@@ -65,6 +65,12 @@ internal void * RIPRel32(void *src, u8 opcode_length)
   return (void *)(rip + offset);
 }
 
+enum BioConversation_TopicFlags {
+  Topic_Skip = 0x4,
+  Topic_Ambient = 0x40,
+  Topic_Patch_ManualSkip = 0x40000000,
+};
+
 struct BioConversation {
   void *vtable;
   u32 unk04[40];
@@ -82,24 +88,44 @@ struct BioConversation {
   u32 unk154[41];
 };
 
+typedef bool (__thiscall *_BioConversation_NeedToDisplayReplies)(BioConversation *conversation);
+typedef bool (__thiscall *_BioConversation_IsAmbient)(BioConversation *conversation);
+
+internal _BioConversation_NeedToDisplayReplies BioConversation_NeedToDisplayReplies = 0;
+internal _BioConversation_IsAmbient BioConversation_IsAmbient = 0;
+
 internal bool IsSkipped(BioConversation *conversation)
 {
   /*
-  if (!IsAmbient(conversation)) {
+  if (!IsAmbient(conversation) && !IsDialogWheelActive(conversation)) {
     return conversation->topicFlags & 0x40000000;
   }
   
   return true;
   */
+  /*bool isSkipped = (conversation->topicFlags & Topic_Patch_ManualSkip);
+  isSkipped = isSkipped || (conversation->topicFlags & Topic_Skip);
   
-  //return (conversation->topicFlags & 0x40000000);
-  MessageBox(0, "Fuck yeah!", "Yeah, fuck!", 0);
+  conversation->topicFlags &= 0xBFFFFFFF;
+  
+  return isSkipped;*/
+  
+  //FIX(adm244): NeedToDisplayReplies() modifies timers (by adding 0.5)
+  // it introduces bugs with an abrupt sound (it is clearly when switching to "wait for a reply" state)
+  // Possible solution is to hook the positive result of a function (or recreate it)
+  
+  if (!BioConversation_IsAmbient(conversation) && !BioConversation_NeedToDisplayReplies(conversation)) {
+    bool isSkipped = (conversation->topicFlags & Topic_Patch_ManualSkip);
+    conversation->topicFlags &= 0xBFFFFFFF;
+    return isSkipped;
+  }
+  
   return true;
 }
 
 internal void SkipNode(BioConversation *conversation)
 {
-  MessageBox(0, "You skipped!", "McFuck!", 0);
+  conversation->topicFlags |= Topic_Patch_ManualSkip;
 }
 
 internal void *skip_jz_dest_address = 0;
@@ -170,6 +196,18 @@ internal BOOL WINAPI DllMain(HMODULE loader, DWORD reason, LPVOID reserved)
 {
   if( reason == DLL_PROCESS_ATTACH )
   {
+    //TODO(adm244): get addresses by a signature search
+    
+    // get function pointers for BioConversation object
+    void *bio_conversation_vtable = (void *)0x118FFD20;
+    BioConversation_NeedToDisplayReplies = (_BioConversation_NeedToDisplayReplies)(*((u32 *)bio_conversation_vtable + 105));
+    BioConversation_IsAmbient = (_BioConversation_IsAmbient)(*((u32 *)bio_conversation_vtable + 93));
+#ifdef DEBUG
+    assert((u64)BioConversation_NeedToDisplayReplies == 0x1090BC67);
+    assert((u64)BioConversation_IsAmbient == 0x10950A8D);
+#endif
+    
+    // hook UpdateConversation function
     void *skip_jz_address = (void *)0x10D13FF5;
     skip_jz_dest_address = RIPRel8(skip_jz_address, 1);
     
@@ -180,9 +218,12 @@ internal BOOL WINAPI DllMain(HMODULE loader, DWORD reason, LPVOID reserved)
 
     WriteDetour(skip_address, &IsSkipped_Hook, 3);
     
+    // hook SkipNode function
     skip_node_address = (void *)0x10CC9060;
     skip_node_mov_address = (void *)(*((u32 *)((u8 *)skip_node_address + 5)));
+#ifdef DEBUG
     assert((u64)skip_node_mov_address == 0x11BC1A44);
+#endif
     
     WriteDetour(skip_node_address, &SkipNode_Hook, 4);
   }
