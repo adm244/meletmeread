@@ -51,8 +51,16 @@ FakeDirectInput8Create(HINSTANCE hinst, DWORD dwVersion, REFIID riidltf, LPVOID 
 
 internal void * RIPRel8(void *src, u8 opcode_length)
 {
-  i8 offset = *((u8 *)((u64)src + opcode_length));
+  i8 offset = *((i8 *)((u64)src + opcode_length));
   u64 rip = (u64)src + opcode_length + sizeof(u8);
+  
+  return (void *)(rip + offset);
+}
+
+internal void * RIPRel32(void *src, u8 opcode_length)
+{
+  i32 offset = *((i32 *)((u64)src + opcode_length));
+  u64 rip = (u64)src + opcode_length + sizeof(u32);
   
   return (void *)(rip + offset);
 }
@@ -76,19 +84,49 @@ struct BioConversation {
 
 internal bool IsSkipped(BioConversation *conversation)
 {
+  /*
+  if (!IsAmbient(conversation)) {
+    return conversation->topicFlags & 0x40000000;
+  }
+  
+  return true;
+  */
+  
   //return (conversation->topicFlags & 0x40000000);
   MessageBox(0, "Fuck yeah!", "Yeah, fuck!", 0);
   return true;
 }
 
+internal void SkipNode(BioConversation *conversation)
+{
+  MessageBox(0, "You skipped!", "McFuck!", 0);
+}
+
 internal void *skip_jz_dest_address = 0;
+internal void *skip_jnz_dest_address = 0;
+internal void *skip_post_jnz_address = 0;
+
+internal void *skip_node_address = 0;
+internal void *skip_node_mov_address = 0;
 
 internal __declspec(naked) void IsSkipped_Hook()
 {
   _asm {
+    push ebx
+    push esi
+    push edi
+    push ebp
+    push esp
+    
     push esi
     call IsSkipped
     add esp, 4
+    
+    pop esp
+    pop ebp
+    pop edi
+    pop esi
+    pop ebx
     
     test al, al
     jz dont_skip_dialog
@@ -96,8 +134,35 @@ internal __declspec(naked) void IsSkipped_Hook()
     
   dont_skip_dialog:
     jmp [skip_jz_dest_address]
-  
+    
   skip_dialog:
+    test ebp, ebp
+    jnz jnz_jump
+    mov eax, [esp + 24h]
+    jmp [skip_post_jnz_address]
+    
+  jnz_jump:
+    jmp [skip_jnz_dest_address]
+  }
+}
+
+internal __declspec(naked) void SkipNode_Hook()
+{
+  _asm {
+    pushad
+    push ecx
+    call SkipNode
+    add esp, 4
+    popad
+    
+    push esi
+    mov esi, ecx
+    mov ecx, [skip_node_mov_address]
+    mov ecx, [ecx]
+    
+    mov eax, skip_node_address
+    add eax, 9
+    jmp eax
   }
 }
 
@@ -110,11 +175,16 @@ internal BOOL WINAPI DllMain(HMODULE loader, DWORD reason, LPVOID reserved)
     
     void *skip_address = (void *)((u64)skip_jz_address + 2);
     void *skip_jnz_address = (void *)((u64)skip_address + 2);
-    void *skip_jnz_dest_address = RIPRel8(skip_jnz_address, 1);
-    void *skip_post_jnz_address = (void *)((u64)skip_jnz_address + 2);
+    skip_jnz_dest_address = RIPRel8(skip_jnz_address, 1);
+    skip_post_jnz_address = (void *)((u64)skip_jnz_address + 6);
+
+    WriteDetour(skip_address, &IsSkipped_Hook, 3);
     
-    uint jump_offsets[1] = {2};
-    Detour(skip_address, &IsSkipped_Hook, 8, jump_offsets, 1);
+    skip_node_address = (void *)0x10CC9060;
+    skip_node_mov_address = (void *)(*((u32 *)((u8 *)skip_node_address + 5)));
+    assert((u64)skip_node_mov_address == 0x11BC1A44);
+    
+    WriteDetour(skip_node_address, &SkipNode_Hook, 4);
   }
 
   return TRUE;
