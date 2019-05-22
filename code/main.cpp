@@ -65,10 +65,18 @@ internal void * RIPRel32(void *src, u8 opcode_length)
   return (void *)(rip + offset);
 }
 
+//FIX(adm244): swap topic and dialog flags
+
 enum BioConversation_TopicFlags {
   Topic_Skip = 0x4,
   Topic_Ambient = 0x40,
+  Topic_IsSpeaking = 0x100,
   Topic_Patch_ManualSkip = 0x40000000,
+};
+
+enum BioConversation_DialogFlags {
+  Dialog_IsVoicePlaying = 0x10,
+  Dialog_Patch_DialogWheelActive = 0x40000000,
 };
 
 struct BioConversation {
@@ -94,29 +102,25 @@ typedef bool (__thiscall *_BioConversation_IsAmbient)(BioConversation *conversat
 internal _BioConversation_NeedToDisplayReplies BioConversation_NeedToDisplayReplies = 0;
 internal _BioConversation_IsAmbient BioConversation_IsAmbient = 0;
 
+internal bool ShouldReply(BioConversation *conversation)
+{
+  return (conversation->dialogFlags & Dialog_Patch_DialogWheelActive);
+}
+
 internal bool IsSkipped(BioConversation *conversation)
 {
-  /*
-  if (!IsAmbient(conversation) && !IsDialogWheelActive(conversation)) {
-    return conversation->topicFlags & 0x40000000;
-  }
-  
-  return true;
-  */
-  /*bool isSkipped = (conversation->topicFlags & Topic_Patch_ManualSkip);
-  isSkipped = isSkipped || (conversation->topicFlags & Topic_Skip);
-  
-  conversation->topicFlags &= 0xBFFFFFFF;
-  
-  return isSkipped;*/
-  
   //FIX(adm244): NeedToDisplayReplies() modifies timers (by adding 0.5)
   // it introduces bugs with an abrupt sound (it is clearly when switching to "wait for a reply" state)
   // Possible solution is to hook the positive result of a function (or recreate it)
   
-  if (!BioConversation_IsAmbient(conversation) && !BioConversation_NeedToDisplayReplies(conversation)) {
+  //NOTE(adm244): there's still some sound clicking and poping
+  // is this a patch problem or game itself comes with these bugs?
+  
+  //FIX(adm244): breaks teleportation from dialogs (fast-travel)
+  
+  if (!BioConversation_IsAmbient(conversation) && !ShouldReply(conversation)) {
     bool isSkipped = (conversation->topicFlags & Topic_Patch_ManualSkip);
-    conversation->topicFlags &= 0xBFFFFFFF;
+    conversation->topicFlags &= ~Topic_Patch_ManualSkip;
     return isSkipped;
   }
   
@@ -125,7 +129,15 @@ internal bool IsSkipped(BioConversation *conversation)
 
 internal void SkipNode(BioConversation *conversation)
 {
-  conversation->topicFlags |= Topic_Patch_ManualSkip;
+  // (NOT speaking) AND DialogWheelActive
+  // (!Speaking && DialogWheelActive)
+  // !(!Speaking && DialogWheelActive)
+  // Speaking || !DisalogWheelActive
+  
+  if ((conversation->dialogFlags & Dialog_IsVoicePlaying)
+    || !(conversation->dialogFlags & Dialog_Patch_DialogWheelActive)) {
+    conversation->topicFlags |= Topic_Patch_ManualSkip;
+  }
 }
 
 internal void *skip_jz_dest_address = 0;
@@ -192,6 +204,31 @@ internal __declspec(naked) void SkipNode_Hook()
   }
 }
 
+internal __declspec(naked) void RepliesActive_Hook()
+{
+  _asm {
+    mov eax, Dialog_Patch_DialogWheelActive
+    or [esi+150h], eax
+    
+    mov eax, 1
+    pop esi
+    retn
+  }
+}
+
+internal __declspec(naked) void RepliesInactive_Hook()
+{
+  _asm {
+    mov eax, Dialog_Patch_DialogWheelActive
+    not eax
+    and [esi+150h], eax
+    
+    xor eax, eax
+    pop esi
+    retn
+  }
+}
+
 internal BOOL WINAPI DllMain(HMODULE loader, DWORD reason, LPVOID reserved)
 {
   if( reason == DLL_PROCESS_ATTACH )
@@ -206,6 +243,13 @@ internal BOOL WINAPI DllMain(HMODULE loader, DWORD reason, LPVOID reserved)
     assert((u64)BioConversation_NeedToDisplayReplies == 0x1090BC67);
     assert((u64)BioConversation_IsAmbient == 0x10950A8D);
 #endif
+    
+    // hook NeedToDisplayReplies function
+    void *replies_active_patch_address = (u8 *)RIPRel32(BioConversation_NeedToDisplayReplies, 1) + 0x3B;
+    void *replies_inactive_patch_address = (u8 *)RIPRel32(BioConversation_NeedToDisplayReplies, 1) + 0x71;
+    
+    WriteDetour(replies_active_patch_address, &RepliesActive_Hook, 2);
+    WriteDetour(replies_inactive_patch_address, &RepliesInactive_Hook, 0);
     
     // hook UpdateConversation function
     void *skip_jz_address = (void *)0x10D13FF5;
