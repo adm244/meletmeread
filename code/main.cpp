@@ -79,28 +79,93 @@ enum BioConversation_DialogFlags {
   Dialog_Patch_DialogWheelActive = 0x40000000,
 };
 
+struct BioString {
+  u16 *text; // 0x0
+  u32 length; // 0x4
+  u32 capacity; //??? 0x8
+}; // 0xC
+
+struct BioConversationReply {
+  u32 textRefId; // 0x0
+  u16 *text; // 0x4
+  u32 unk8;
+  u32 unkC;
+  u32 unk10;
+  i32 conditionalFunc; // 0x14
+  u32 unk18;
+  i32 stateTransition; // 0x1C
+  u32 unk20;
+  u32 exportId; // 0x24
+  u32 unk28;
+  u32 unk2C;
+  u32 unk30;
+  u32 unk34;
+  u32 unk38;
+  u32 cameraIntimacy; // 0x3C
+  u32 ignoreBodyGestures; // 0x40
+  u32 *entryIndexList; // 0x44
+  u32 unk48;
+  u32 unk4C;
+  u32 unk50;
+  u32 listenerIndex;
+  u32 unk58;
+}; // 0x5C
+
+struct BioConversationEntryReply {
+  u32 index; // 0x0
+  u32 textRefId; // 0x4
+  u32 unk8;
+  u32 unkC;
+  u32 unk10;
+  u32 category; //??? 0x14
+}; // 0x18
+
+struct BioConversationEntry {
+  u32 textRefId; // 0x0
+  u16 *text; // 0x4
+  u8 unk8[0x24-0x8];
+  u32 exportId; // 0x24
+  u8 unk28[0x44-0x28];
+  BioConversationEntryReply *replyList; // 0x44
+  u8 unk48[0x68-0x48];
+}; // 0x68
+
 struct BioConversation {
   void *vtable;
-  u32 unk04[40];
+  u8 unk04[0x48-0x4];
+  BioConversationEntry *entryList; // 0x48
+  u32 unk4C;
+  u32 unk50;
+  BioConversationReply *replyList; // 0x54
+  u8 unk58[0x90-0x58];
+  i32 currentEntryIndex; // 0x90
+  u32 unk94;
+  u32 unk98;
+  u32 unk9C;
+  u32 unkA0;
   void *owner; // 0xA4
   void *player; // 0xA8
   void *speaker; // 0xAC
   u32 unkB0;
   void *listener; // 0xB4
-  u32 unkB8[4];
+  u32 unkB8[3];
+  i32 currentReplyIndex; // 0xC4
   void *kismetSequence; // 0xC8
   u32 unkCC[2];
   u32 topicFlags; // 0xD4
   u32 unkD8[30];
   u32 dialogFlags; // 0x150
-  u32 unk154[41];
-};
+  u8 unk154[0x1FC-0x154];
+}; // 0x1FC
 
 typedef bool (__thiscall *_BioConversation_NeedToDisplayReplies)(BioConversation *conversation);
 typedef bool (__thiscall *_BioConversation_IsAmbient)(BioConversation *conversation);
+typedef BioString * (__thiscall *_BioConversation_GetReplyTextInternal)
+(BioConversation *conversation, BioString *dest, int replyIndex, int unk);
 
 internal _BioConversation_NeedToDisplayReplies BioConversation_NeedToDisplayReplies = 0;
 internal _BioConversation_IsAmbient BioConversation_IsAmbient = 0;
+internal _BioConversation_GetReplyTextInternal BioConversation_GetReplyTextInternal = (_BioConversation_GetReplyTextInternal)0x10CD66F0;
 
 internal bool ShouldReply(BioConversation *conversation)
 {
@@ -117,6 +182,22 @@ internal bool IsSkipped(BioConversation *conversation)
   // is this a patch problem or game itself comes with these bugs?
   
   //FIX(adm244): breaks teleportation from dialogs (fast-travel)
+  
+  //NOTE(adm244): helps with skipping "empty" replies, but does not fix infinite-loading bug
+  //TODO(adm244): try to find out more about NonTextline flag...
+  if (conversation->currentReplyIndex >= 0) {
+    BioConversationEntry entry = conversation->entryList[conversation->currentEntryIndex];
+    BioConversationEntryReply entryReply = entry.replyList[conversation->currentReplyIndex];
+  
+    BioString replyText = {0};
+    BioConversation_GetReplyTextInternal(conversation, &replyText, entryReply.index, 0);
+    
+    //MessageBoxW(0, (LPCWSTR)replyText.text, (LPCWSTR)replyText.text, 0);
+    if (replyText.length < 3) {
+      MessageBoxA(0, "Reply text is empty! Skipping dialog.", "Whoop", 0);
+      return true;
+    }
+  }
   
   if (!BioConversation_IsAmbient(conversation) && !ShouldReply(conversation)) {
     bool isSkipped = (conversation->topicFlags & Topic_Patch_ManualSkip);
