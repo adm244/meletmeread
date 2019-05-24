@@ -79,6 +79,10 @@ enum BioConversation_DialogFlags {
   Dialog_Patch_DialogWheelActive = 0x40000000,
 };
 
+enum BioConversationEntry_Flags {
+  Entry_NonTextline = 0x2,
+};
+
 struct BioString {
   u16 *text; // 0x0
   u32 length; // 0x4
@@ -97,7 +101,7 @@ struct BioConversationReply {
   u32 unk20;
   u32 exportId; // 0x24
   u32 unk28;
-  u32 unk2C;
+  u32 unk2C; // flags?
   u32 unk30;
   u32 unk34;
   u32 unk38;
@@ -120,12 +124,15 @@ struct BioConversationEntryReply {
   u32 category; //??? 0x14
 }; // 0x18
 
+//NOTE(adm244): same as BioConversationReply, but with a BioString appended?
 struct BioConversationEntry {
   u32 textRefId; // 0x0
-  u16 *text; // 0x4
-  u8 unk8[0x24-0x8];
+  BioString text; // 0x4
+  u8 unk10[0x24-0x10];
   u32 exportId; // 0x24
-  u8 unk28[0x44-0x28];
+  u32 unk28;
+  u32 flags; // 0x2C
+  u8 unk30[0x44-0x30];
   BioConversationEntryReply *replyList; // 0x44
   u8 unk48[0x68-0x48];
 }; // 0x68
@@ -181,20 +188,21 @@ internal bool IsSkipped(BioConversation *conversation)
   //NOTE(adm244): there's still some sound clicking and poping
   // is this a patch problem or game itself comes with these bugs?
   
-  //FIX(adm244): breaks teleportation from dialogs (fast-travel)
+  //NOTE(adm244): fixes infinite-loading bug
+  BioConversationEntry entry = conversation->entryList[conversation->currentEntryIndex];
+  if (entry.flags & Entry_NonTextline) {
+    return true;
+  }
   
-  //NOTE(adm244): helps with skipping "empty" replies, but does not fix infinite-loading bug
-  //TODO(adm244): try to find out more about NonTextline flag...
+  //NOTE(adm244): skipes "empty" replies
   if (conversation->currentReplyIndex >= 0) {
-    BioConversationEntry entry = conversation->entryList[conversation->currentEntryIndex];
     BioConversationEntryReply entryReply = entry.replyList[conversation->currentReplyIndex];
   
     BioString replyText = {0};
     BioConversation_GetReplyTextInternal(conversation, &replyText, entryReply.index, 0);
     
-    //MessageBoxW(0, (LPCWSTR)replyText.text, (LPCWSTR)replyText.text, 0);
+    //NOTE(adm244): probably should check if string contains only whitespaces or empty
     if (replyText.length < 3) {
-      MessageBoxA(0, "Reply text is empty! Skipping dialog.", "Whoop", 0);
       return true;
     }
   }
