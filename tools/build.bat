@@ -5,13 +5,19 @@ REM https://github.com/adm244/cdev
 SETLOCAL
 REM [customize those variables]
 SET libs=kernel32.lib user32.lib Psapi.lib
-SET files=%source%\main.cpp
-SET deffile=%source%\exports.def
+SET libshook=kernel32.lib shell32.lib
+SET files=..\%source%\main.cpp
+SET fileshook=%source%\loader\main.cpp
+SET deffile=%source%\loader\exports.def
+SET commoninclude=%source%\common
 SET hookname=dinput8
+SET projname=letmeread
+SET modsdir=NativeMods
 
-SET debug=/Od /Zi /Fe%hookname% /nologo /DDEBUG
-SET release=/O2 /WX /Fe%hookname% /nologo
-SET args=%debug% %files% /LD /link /DEF:%deffile% %libs%
+SET debug=/Od /Zi /nologo /DDEBUG /LDd
+SET release=/O2 /WX /nologo /LD
+SET args=/I..\%commoninclude% /Fe%projname% %files% %release% /link %libs%
+SET argshook=/I%commoninclude% /Fe%hookname% %fileshook% %release% /link /DEF:%deffile% %libshook%
 
 SET compiler=CL
 REM ###########################
@@ -28,7 +34,15 @@ GOTO Error
 ECHO: Build started...
 
 IF NOT EXIST "%bin%" MKDIR "%bin%"
+IF NOT EXIST "%bin%\%modsdir%" MKDIR "%bin%\%modsdir%"
+
+ECHO: Compiling hook...
 PUSHD "%bin%"
+"%compiler%" %argshook%
+POPD
+
+ECHO: Compiling mod...
+PUSHD "%bin%\%modsdir%"
 "%compiler%" %args%
 POPD
 

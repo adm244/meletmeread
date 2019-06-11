@@ -29,7 +29,23 @@ OTHER DEALINGS IN THE SOFTWARE.
 #define _DETOURS_CPP
 
 #define DETOUR_LENGTH 5
-#define DETOUR_TEMP_CODE_SIZE 512
+//#define DETOUR_TEMP_CODE_SIZE 512
+
+internal void * RIPRel8(void *src, u8 opcode_length)
+{
+  i8 offset = *((i8 *)((u64)src + opcode_length));
+  u64 rip = (u64)src + opcode_length + sizeof(u8);
+  
+  return (void *)(rip + offset);
+}
+
+internal void * RIPRel32(void *src, u8 opcode_length)
+{
+  i32 offset = *((i32 *)((u64)src + opcode_length));
+  u64 rip = (u64)src + opcode_length + sizeof(u32);
+  
+  return (void *)(rip + offset);
+}
 
 internal i32 RIPRelOffset32(void *rip, void *dest)
 {
@@ -72,6 +88,7 @@ internal bool WriteDetour(void *src, void *dest, int padding)
   return true;
 }
 
+/*
 /// Assembles a relative 32-bit call
 internal void * CallRel32(void *src, void *dest)
 {
@@ -260,5 +277,5 @@ internal bool Detour(void *src, void *dest, u32 len, uint *jump_offsets, uint ju
   
   return true;
 }
-
+*/
 #endif
